@@ -1,1 +1,19 @@
-I use this script such that I can easily track which OnePace episode I am on without having to remember. Just create an alias to run the script in the directory where the videos lie and enjoy
+# OnePace Video Player
+
+Video Player to easily keep track on which episode you are on. You need to have downloaded all of the episodes in some folder and they should only contain numbers as filenames (sequential at best). 
+
+## Features
+- Track watching progress
+- Auto-play next episode
+- Delete watched episodes
+- 
+## Requirements
+- Python 3.x
+- MPV Player
+- PyQt6
+
+## Installation
+```bash
+sudo apt install python3-pyqt6 mpv
+
+then just run the script. 
