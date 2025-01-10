@@ -15,5 +15,5 @@ Video Player to easily keep track on which episode you are on. You need to have 
 ## Installation
 ```bash
 sudo apt install python3-pyqt6 mpv
-
-then just run the script. 
+```
+Then you can just run the script. I would suggest creating an alias for the script such that you can run it from anywhere. 
