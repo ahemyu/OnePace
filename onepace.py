@@ -1,7 +1,8 @@
 from pathlib import Path
 import sys
 import subprocess
-from typing import List, Optional
+import json
+from typing import List, Optional, Dict
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QPushButton, QLabel, QMessageBox
@@ -18,6 +19,10 @@ class VideoPlayer(QMainWindow):
         self.video_dir = Path("/home/emre-fox/Videos/Dressrosa")
         self.current_episode = self.load_progress()
         self.videos = self.get_sorted_videos()
+        
+        # Position tracking
+        self.positions: Dict[str, float] = self.load_positions()
+        self.last_position: float = 0
         
         # MPV process tracking
         self.current_process: Optional[subprocess.Popen] = None
@@ -82,14 +87,58 @@ class VideoPlayer(QMainWindow):
     def save_progress(self) -> None:
         """Save current episode to progress file."""
         Path(".progress").write_text(str(self.current_episode))
+
+    def load_positions(self) -> Dict[str, float]:
+        """Load saved video positions from JSON file."""
+        position_file = Path(".positions.json")
+        if position_file.exists():
+            return json.loads(position_file.read_text())
+        return {}
+
+    def save_positions(self) -> None:
+        """Save video positions to JSON file."""
+        Path(".positions.json").write_text(json.dumps(self.positions))
+
+    def get_video_position(self) -> None:
+        """Get current video position using MPV's IPC socket."""
+        if self.current_process:
+            try:
+                # Use echo '{ "command": ["get_property", "time-pos"] }' | socat - /tmp/mpvsocket
+                result = subprocess.run(
+                    ['socat', '-', '/tmp/mpvsocket'],
+                    input='{ "command": ["get_property", "time-pos"] }\n',
+                    text=True,
+                    capture_output=True
+                )
+                if result.stdout:
+                    response = json.loads(result.stdout)
+                    if 'data' in response:
+                        self.last_position = float(response['data'])
+            except Exception as e:
+                print(f"Error getting position: {e}")
+
+    def get_video_duration(self, video_path: Path) -> Optional[float]:
+        """Get video duration using ffprobe."""
+        try:
+            result = subprocess.run([
+                'ffprobe', 
+                '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                str(video_path)
+            ], capture_output=True, text=True)
+            return float(result.stdout.strip())
+        except Exception as e:
+            print(f"Error getting duration: {e}")
+            return None
     
     def play_current(self) -> None:
-        """Play the current episode using MPV, handling missing episodes."""
+        """Play the current episode using MPV, resuming from last position."""
         if not self.videos:
             QMessageBox.information(self, "Error", "No video files found!")
             return
             
-        # Find the index of the current episode in our available videos
+        # Find the current episode video
         current_idx = -1
         for idx, video in enumerate(self.videos):
             if int(video.stem) == self.current_episode:
@@ -106,34 +155,61 @@ class VideoPlayer(QMainWindow):
             
         # Stop any existing playback
         if self.current_process:
+            self.get_video_position()  # Save current position before stopping
             self.current_process.terminate()
             self.current_process = None
         
         current_video = self.videos[current_idx]
+        video_key = str(current_video)
+        start_position = self.positions.get(video_key, 0)
         
-        # Start MPV with specific options
+        # Start MPV with position and IPC socket
         self.current_process = subprocess.Popen([
             'mpv',
             '--hwdec=auto',
             '--profile=gpu-hq',
             '--force-window=yes',
+            f'--start={start_position}',
+            '--input-ipc-server=/tmp/mpvsocket',  # Enable IPC socket for position tracking
             str(current_video)
         ])
         
         self.check_timer.start()
     
     def check_video_end(self) -> None:
-        """Check if video has ended and prompt for next action."""
-        if self.current_process and self.current_process.poll() is not None:
-            self.check_timer.stop()
-            reply = QMessageBox.question(
-                self,
-                'Video Finished',
-                'Would you like to proceed to the next episode?',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self.next_episode()
+        """Check if video has ended and save position."""
+        if self.current_process:
+            if self.current_process.poll() is not None:
+                self.check_timer.stop()
+                current_video = next(
+                    (v for v in self.videos if int(v.stem) == self.current_episode), 
+                    None
+                )
+                
+                if current_video:
+                    video_key = str(current_video)
+                    # Only prompt for next episode if we're near the end
+                    video_duration = self.get_video_duration(current_video)
+                    if video_duration and self.last_position >= (video_duration - 30):
+                        # We're at the end of the video
+                        self.positions.pop(video_key, None)  # Remove position for completed episode
+                        self.save_positions()
+                        
+                        reply = QMessageBox.question(
+                            self,
+                            'Video Finished',
+                            'Would you like to proceed to the next episode?',
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                        )
+                        if reply == QMessageBox.StandardButton.Yes:
+                            self.next_episode()
+                    else:
+                        # Save the last position
+                        self.positions[video_key] = self.last_position
+                        self.save_positions()
+            else:
+                # Update position while video is playing
+                self.get_video_position()
     
     def delete_previous(self) -> None:
         """Delete the previous episode after confirmation."""
@@ -156,6 +232,10 @@ class VideoPlayer(QMainWindow):
         )
         
         if reply == QMessageBox.StandardButton.Yes:
+            # Remove position data for deleted episode
+            self.positions.pop(str(prev_video), None)
+            self.save_positions()
+            
             prev_video.unlink()
             self.videos = self.get_sorted_videos()  # Refresh video list
             QMessageBox.information(self, "Success", "Previous episode deleted.")
@@ -182,18 +262,23 @@ class VideoPlayer(QMainWindow):
     def closeEvent(self, event) -> None:
         """Clean up when closing the application."""
         if self.current_process:
+            self.get_video_position()  # Save final position
+            current_video = next(
+                (v for v in self.videos if int(v.stem) == self.current_episode), 
+                None
+            )
+            if current_video:
+                self.positions[str(current_video)] = self.last_position
+                self.save_positions()
+                
             try:
-                # First try to terminate gracefully
                 self.current_process.terminate()
-                # Wait for up to 3 seconds for the process to end
                 self.current_process.wait(timeout=3)
             except subprocess.TimeoutExpired:
-                # If it doesn't terminate within 3 seconds, kill it forcefully
                 self.current_process.kill()
             except Exception as e:
                 print(f"Error while closing MPV: {e}")
                 
-        # Force Python to exit
         sys.exit(0)
 
 if __name__ == "__main__":
