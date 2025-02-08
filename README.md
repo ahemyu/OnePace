@@ -1,12 +1,10 @@
 # OnePace Video Player
 
-Video Player to easily keep track on which episode you are on. You need to have downloaded all of the episodes in some folder and they should only contain numbers as filenames (sequential at best). 
+Video Player to easily keep track on which episode you are on. You need to have downloaded all of the episodes in some folder and they should only contain numbers as filenames (sequential at best). I built this as a convenience for myself to ease the watching of the One Piece Anime. 
 
 ## Features
-- Track watching progress
-- Auto-play next episode
-- Delete watched episodes
-- 
+- Keep watching where you left off
+- delete already watched episodes
 ## Requirements
 - Python 3.x
 - MPV Player
