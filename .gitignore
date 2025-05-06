@@ -1,5 +1,6 @@
 /.idea
 /venv
 .env
-/positions.json
-
+/.positions.json
+.progress
+.cache
