@@ -16,7 +16,7 @@ class VideoPlayer(QMainWindow):
         self.setGeometry(100, 100, 400, 200)
         
         # Initialize video tracking
-        self.video_dir = Path("/home/emre-fox/Videos/episodes/Wano")
+        self.video_dir = Path("/home/emre-fox/Videos/episodes/EggHead")
         self.current_episode = self.load_progress()
         self.videos = self.get_sorted_videos()
         
